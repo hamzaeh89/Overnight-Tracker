@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Overnight">
+<title>Hyperliquid Stock Perps vs Last Close</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e8eaf0; --mute:#8a91a3; --up:#22c55e; --down:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:820px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--mute); font-size:12px; margin-bottom:12px; }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  button { background:#2a3040; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button:hover { background:#343b4f; }
+  .status { color:var(--mute); font-size:12px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:10px; overflow:hidden; }
+  th, td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--mute); font-weight:500; font-size:12px; }
+  th:first-child, td:first-child { text-align:left; font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .up { color:var(--up); } .down { color:var(--down); } .na { color:var(--mute); }
+  .dex { color:var(--mute); font-size:11px; font-weight:400; margin-left:4px; }
+  textarea { width:100%; min-height:220px; background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,Menlo,monospace; }
+  .edit { display:none; margin-top:12px; }
+  .note { color:var(--mute); font-size:12px; margin-top:12px; }
+  @media (max-width:560px) { th, td { padding:8px 6px; font-size:13px; } .hide-sm { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hyperliquid stock perps vs last official close</h1>
+  <div class="sub" id="baseline">Baseline: official close Fri Nov 20, 2026</div>
+  <div class="bar">
+    <button id="refresh">Refresh now</button>
+    <button id="toggleEdit">Edit tickers / closes</button>
+    <span class="status" id="status">Loading…</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Ticker</th><th>Perp price</th><th class="hide-sm">Last close</th><th>$ chg</th><th>% chg</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="edit" id="editBox">
+    <div class="sub">One per line: TICKER CLOSE. First line may be "# label" for the baseline text.</div>
+    <textarea id="cfg"></textarea>
+    <div class="bar" style="margin-top:8px"><button id="save">Save</button><button id="reset">Reset to defaults</button></div>
+  </div>
+  <div class="note">
+    Prices come straight from Hyperliquid's public API (api.hyperliquid.xyz), refreshed every 30 seconds. Uses the mid price, or the mark price if there's no mid.
+    Looks on the trade.xyz deployer first, then on any other Hyperliquid deployer that lists the same ticker (shown in grey next to the name).
+    "Not listed" means no Hyperliquid market uses that exact ticker. An index perp like SP500 trades at a different price level than SPY, so it isn't substituted.
+  </div>
+</div>
+<script>
+const DEFAULT_CFG = `# Fri Nov 20, 2026
+SPX 6910.39
+NDX 25028.98
+RTY 2581.79
+SPY 689.81
+QQQ 608.45
+IWM 256.61
+AAPL 342.56
+AMZN 246.82
+GOOGL 265.29
+META 560.84
+AMD 424.39
+MU 594.54
+NVDA 125.53
+TSLA 345.82
+EEM 53.84`;
+const API = "https://api.hyperliquid.xyz/info";
+const KEY = "hlPerpTrackerCfg_v2";
+let dexList = null;
+
+function loadCfg() { try { return localStorage.getItem(KEY) || DEFAULT_CFG; } catch(e) { return DEFAULT_CFG; } }
+function saveCfg(t) { try { localStorage.setItem(KEY, t); } catch(e) {} }
+function parseCfg(t) {
+  let label = null; const items = [];
+  t.split(/\n/).forEach(line => {
+    line = line.trim(); if (!line) return;
+    if (line.startsWith("#")) { label = line.slice(1).trim(); return; }
+    const [tk, c] = line.split(/[\s,]+/);
+    if (tk) items.push({ ticker: tk.toUpperCase(), close: parseFloat(c) });
+  });
+  return { label, items };
+}
+async function post(body) {
+  const r = await fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+async function getDexes() {
+  if (dexList) return dexList;
+  try {
+    const d = await post({ type:"perpDexs" });
+    const names = d.filter(x => x && x.name).map(x => x.name);
+    // trade.xyz first, then the rest
+    dexList = ["xyz", ...names.filter(n => n !== "xyz")];
+  } catch(e) { dexList = ["xyz"]; }
+  return dexList;
+}
+async function fetchDex(dex) {
+  const [meta, ctxs] = await post({ type:"metaAndAssetCtxs", dex });
+  const map = {};
+  meta.universe.forEach((u, i) => {
+    const c = ctxs[i]; if (!c) return;
+    const name = u.name.includes(":") ? u.name.split(":")[1] : u.name;
+    const px = parseFloat(c.midPx ?? c.markPx);
+    if (!isFinite(px)) return;
+    map[name.toUpperCase()] = { px, delisted: !!u.isDelisted };
+  });
+  return map;
+}
+const fmt = (n, d=2) => n.toLocaleString(undefined, { minimumFractionDigits:d, maximumFractionDigits:d });
+
+async function update() {
+  const { label, items } = parseCfg(loadCfg());
+  document.getElementById("baseline").textContent = "Baseline: official close " + (label || "(custom)");
+  const status = document.getElementById("status");
+  try {
+    const dexes = await getDexes();
+    const found = {};
+    const need = new Set(items.map(i => i.ticker));
+    for (const dex of dexes) {
+      if (![...need].some(t => !found[t])) break;
+      let map; try { map = await fetchDex(dex); } catch(e) { continue; }
+      need.forEach(t => { if (!found[t] && map[t] && !map[t].delisted) found[t] = { ...map[t], dex }; });
+    }
+    document.getElementById("rows").innerHTML = items.map(({ ticker, close }) => {
+      const f = found[ticker];
+      if (!f) return `<tr><td>${ticker}</td><td class="na">Not listed</td><td class="hide-sm">${isFinite(close)?fmt(close):"—"}</td><td class="na">—</td><td class="na">—</td></tr>`;
+      const dexTag = f.dex === "xyz" ? "" : `<span class="dex">${f.dex}</span>`;
+      if (!isFinite(close)) return `<tr><td>${ticker}${dexTag}</td><td>${fmt(f.px)}</td><td class="hide-sm na">—</td><td class="na">—</td><td class="na">—</td></tr>`;
+      const ch = f.px - close, pct = ch / close * 100, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
+      const s = ch > 0 ? "+" : "";
+      return `<tr><td>${ticker}${dexTag}</td><td>${fmt(f.px)}</td><td class="hide-sm">${fmt(close)}</td><td class="${cls}">${s}${fmt(ch)}</td><td class="${cls}">${s}${fmt(pct)}%</td></tr>`;
+    }).join("");
+    status.textContent = "Updated " + new Date().toLocaleTimeString() + " · auto-refresh 30s";
+  } catch(e) {
+    status.textContent = "Couldn't reach Hyperliquid (" + e.message + "). Retrying in 30s.";
+  }
+}
+document.getElementById("refresh").onclick = update;
+document.getElementById("toggleEdit").onclick = () => {
+  const b = document.getElementById("editBox");
+  const open = b.style.display === "block";
+  if (!open) document.getElementById("cfg").value = loadCfg();
+  b.style.display = open ? "none" : "block";
+};
+document.getElementById("save").onclick = () => { saveCfg(document.getElementById("cfg").value); document.getElementById("editBox").style.display="none"; update(); };
+document.getElementById("reset").onclick = () => { saveCfg(DEFAULT_CFG); document.getElementById("cfg").value = DEFAULT_CFG; update(); };
+update();
+setInterval(update, 30000);
+</script>
+</body>
+</html>
