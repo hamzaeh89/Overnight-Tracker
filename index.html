@@ -5,41 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Overnight">
-<title>Hyperliquid Stock Perps vs Last Close</title>
+<title>Overnight Tracker</title>
 <style>
   :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --text:#e8eaf0; --mute:#8a91a3; --up:#22c55e; --down:#ef4444; --warn:#f59e0b; }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
   .wrap { max-width:820px; margin:0 auto; padding:16px; }
   h1 { font-size:18px; margin:0 0 4px; }
-  .sub { color:var(--mute); font-size:12px; margin-bottom:12px; }
-  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .sub { color:var(--mute); font-size:12px; margin-bottom:10px; }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
   button { background:#2a3040; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 12px; font:inherit; cursor:pointer; }
   button:hover { background:#343b4f; }
   .status { color:var(--mute); font-size:12px; width:100%; }
   table { width:100%; border-collapse:collapse; background:var(--card); border-radius:10px; overflow:hidden; }
-  th, td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
   th { color:var(--mute); font-weight:500; font-size:12px; }
   th:first-child, td:first-child { text-align:left; font-weight:600; }
+  tr.sec td { background:#11141a; color:var(--mute); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding:6px 10px; }
   tr:last-child td { border-bottom:none; }
   .up { color:var(--up); } .down { color:var(--down); } .na { color:var(--mute); }
-  .tag { display:block; color:var(--mute); font-size:11px; font-weight:400; }
-  .warn { color:var(--warn); font-size:11px; display:block; }
+  .warn { color:var(--warn); font-size:11px; display:block; font-weight:400; }
+  .man { color:var(--mute); font-size:10px; }
   textarea, input[type=search] { width:100%; background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,Menlo,monospace; }
-  textarea { min-height:240px; }
+  textarea { min-height:300px; }
   .panel { display:none; margin-top:12px; }
   .mlist { max-height:360px; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:8px; margin-top:8px; }
   .mrow { display:flex; justify-content:space-between; padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
-  .mrow:hover { background:#202533; }
   .mrow span:last-child { color:var(--mute); }
   .note { color:var(--mute); font-size:12px; margin-top:12px; }
-  @media (max-width:560px) { th, td { padding:8px 6px; font-size:13px; } .hide-sm { display:none; } }
+  @media (max-width:560px) { th, td { padding:7px 6px; font-size:13px; } .hide-sm { display:none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Hyperliquid perps vs last official close</h1>
-  <div class="sub" id="baseline">Baseline: official close</div>
+  <h1>Overnight tracker</h1>
+  <div class="sub" id="closes">Hyperliquid perps vs last official close</div>
   <div class="bar">
     <button id="refresh">Refresh now</button>
     <button id="toggleFind">Find markets</button>
@@ -48,164 +48,245 @@
   </div>
   <table>
     <thead><tr>
-      <th>Ticker</th><th>Perp price</th><th class="hide-sm">Last close</th><th>$ chg</th><th>% chg</th>
+      <th>Ticker</th><th>Price</th><th>Last close</th><th>% chg</th><th class="hide-sm">$ chg</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
 
   <div class="panel" id="findBox">
-    <div class="sub">Every market on Hyperliquid's stock/index deployers. Tap one to add it to your list (then set its close under Edit list).</div>
-    <input type="search" id="findInput" placeholder="Search e.g. 500, 100, russell, EEM">
+    <div class="sub">Every Hyperliquid market. Tap one to add it to the end of your list.</div>
+    <input type="search" id="findInput" placeholder="Search e.g. GOLD, 500, NVDA">
     <div class="mlist" id="mlist"></div>
   </div>
 
   <div class="panel" id="editBox">
     <div class="sub">
-      One per line: <b>TICKER CLOSE</b>.<br>
-      To show a market under your own name: <b>NAME=MARKET CLOSE</b> (e.g. <b>SPX=SP500 6910.39</b>). MARKET can include a deployer, e.g. <b>km:US500</b>.<br>
-      A line starting with # sets the baseline label.
+      One market per line, e.g. <b>xyz:NVDA</b> or <b>PAXG</b>. Lines starting with <b>#</b> are section headers.<br>
+      Optional after the market: a fixed close price (e.g. <b>xyz:NVDA 125.53</b>) and/or a session: <b>@US</b>, <b>@METAL</b>, <b>@KRX</b>, <b>@TSE</b>.
     </div>
     <textarea id="cfg"></textarea>
     <div class="bar" style="margin-top:8px"><button id="save">Save</button><button id="reset">Reset to defaults</button></div>
   </div>
 
   <div class="note">
-    Live from Hyperliquid's public API, every 30s (mid price, or mark if no mid). trade.xyz markets are preferred; other deployers are shown in grey under the name.
-    Index perps can trade on their own scale, so a <span style="color:var(--warn)">⚠ check</span> appears if a move vs close is over 15% — that usually means the market isn't the same thing as the close you entered.
+    Live prices from Hyperliquid's public API every 30s (mid price, or mark if no mid).<br>
+    <b>Last close</b> = the perp's price at the bell of the most recent session of its home market (US stocks & indices 4:00 PM ET; gold, silver & PAXG at the COMEX 1:30 PM ET settlement; Korea 3:30 PM KST; Tokyo 3:30 PM JST). While the market is open, the perp tracks the official price, so this lands within a few cents of the official close and updates itself every day. A close typed in the list overrides it (shown with "fixed").<br>
+    <span style="color:var(--warn)">⚠ check</span> appears on any move over 15%.
   </div>
 </div>
 <script>
-const DEFAULT_CFG = `# Fri Nov 20, 2026
-SPX 6910.39
-NDX 25028.98
-RTY 2581.79
-SPY 689.81
-QQQ 608.45
-IWM 256.61
-AAPL 342.56
-AMZN 246.82
-GOOGL 265.29
-META 560.84
-AMD 424.39
-MU 594.54
-NVDA 125.53
-TSLA 345.82
-EEM 53.84`;
+const DEFAULT_CFG = `# Indices
+xyz:SP500
+xyz:XYZ100
 
-// Names Hyperliquid deployers may use for the same thing, tried in order.
-const ALIASES = {
-  SPX:  ["SP500","SPX","US500","USA500","S&P500","SPX500"],
-  NDX:  ["NDX","NAS100","US100","USTECH","NASDAQ100","XYZ100"],
-  RTY:  ["RTY","RUT","US2000","RUSSELL","RUSSELL2000","SMALL2000","R2000"],
-  SPY:  ["SPY"], QQQ: ["QQQ"], IWM: ["IWM"], EEM: ["EEM"],
+# Precious Metals
+xyz:GOLD
+xyz:SILVER
+PAXG
+
+# Magnificent 7
+xyz:NVDA
+xyz:AAPL
+xyz:MSFT
+xyz:GOOGL
+xyz:AMZN
+xyz:META
+xyz:TSLA
+
+# Semiconductors & Hardware
+xyz:TSM
+xyz:AVGO
+xyz:AMD
+xyz:INTC
+xyz:MU
+xyz:MRVL
+xyz:SKHX
+xyz:SMSN
+xyz:KIOXIA
+xyz:CBRS`;
+
+// Home-market session for names that don't trade on US hours.
+const SESSION_OF = { GOLD:"METAL", SILVER:"METAL", PAXG:"METAL", SKHX:"KRX", SMSN:"KRX", KIOXIA:"TSE" };
+
+// Close times and holidays (weekdays the market is shut). Early closes override the time for that date.
+const SESSIONS = {
+  US:    { tz:"America/New_York", h:16, m:0, label:"US 4:00 PM ET",
+           early:{ "2026-11-27":[13,0], "2026-12-24":[13,0], "2027-11-26":[13,0] },
+           hol:["2026-11-26","2026-12-25","2027-01-01","2027-01-18","2027-02-15","2027-03-26","2027-05-31","2027-06-18","2027-07-05","2027-09-06","2027-11-25","2027-12-24"] },
+  METAL: { tz:"America/New_York", h:13, m:30, label:"COMEX 1:30 PM ET",
+           early:{ "2026-11-27":[13,0], "2026-12-24":[13,0] },
+           hol:["2026-11-26","2026-12-25","2027-01-01","2027-03-26","2027-12-24"] },
+  KRX:   { tz:"Asia/Seoul", h:15, m:30, label:"Korea 3:30 PM KST", early:{},
+           hol:["2026-12-25","2026-12-31","2027-01-01"] },
+  TSE:   { tz:"Asia/Tokyo", h:15, m:30, label:"Tokyo 3:30 PM JST", early:{},
+           hol:["2026-11-23","2026-12-31","2027-01-01","2027-01-11","2027-02-11","2027-02-23"] },
 };
 
 const API = "https://api.hyperliquid.xyz/info";
-const KEY = "hlPerpTrackerCfg_v3";
+const KEY = "overnightTrackerCfg_v4";
 let dexList = null, lastMarkets = [];
+const baseCache = {}; // coin|closeMs -> price
 
 function loadCfg() { try { return localStorage.getItem(KEY) || DEFAULT_CFG; } catch(e) { return DEFAULT_CFG; } }
 function saveCfg(t) { try { localStorage.setItem(KEY, t); } catch(e) {} }
+
 function parseCfg(t) {
-  let label = null; const items = [];
+  const out = [];
   t.split(/\n/).forEach(line => {
     line = line.trim(); if (!line) return;
-    if (line.startsWith("#")) { label = line.slice(1).trim(); return; }
-    const [tok, c] = line.split(/[\s,]+/);
-    if (!tok) return;
-    const [name, market] = tok.split("=");
-    items.push({ name: name.toUpperCase(), market: market ? market.toUpperCase() : null, close: parseFloat(c) });
+    if (line.startsWith("#")) { out.push({ section: line.replace(/^#+/, "").trim() }); return; }
+    const parts = line.split(/\s+/);
+    let coin = parts[0], close = NaN, session = null;
+    parts.slice(1).forEach(p => {
+      if (p.startsWith("@")) session = p.slice(1).toUpperCase();
+      else if (isFinite(parseFloat(p))) close = parseFloat(p);
+    });
+    if (coin.includes(":")) { const [d, n] = coin.split(":"); coin = d.toLowerCase() + ":" + n.toUpperCase(); }
+    else coin = coin.toUpperCase();
+    const name = coin.includes(":") ? coin.split(":")[1] : coin;
+    out.push({ coin, name, close, session: session || SESSION_OF[name] || "US" });
   });
-  return { label, items };
+  return out;
 }
+
 async function post(body) {
   const r = await fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
+
+// ---- time helpers ----
+function tzParts(ms, tz) {
+  const f = new Intl.DateTimeFormat("en-US", { timeZone:tz, year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hourCycle:"h23", weekday:"short" });
+  const o = {}; f.formatToParts(new Date(ms)).forEach(p => o[p.type] = p.value);
+  return { y:+o.year, mo:+o.month, d:+o.day, h:+o.hour, mi:+o.minute, wd:o.weekday };
+}
+function zonedToUtc(y, mo, d, h, mi, tz) {
+  let guess = Date.UTC(y, mo - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) {
+    const p = tzParts(guess, tz);
+    const asUtc = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi);
+    guess -= asUtc - Date.UTC(y, mo - 1, d, h, mi);
+  }
+  return guess;
+}
+const pad = n => String(n).padStart(2, "0");
+function lastCloseMs(sessionKey, now) {
+  const s = SESSIONS[sessionKey] || SESSIONS.US;
+  for (let back = 0; back < 15; back++) {
+    const p = tzParts(now - back * 86400000, s.tz);
+    if (p.wd === "Sat" || p.wd === "Sun") continue;
+    const key = `${p.y}-${pad(p.mo)}-${pad(p.d)}`;
+    if (s.hol.includes(key)) continue;
+    const [h, m] = s.early[key] || [s.h, s.m];
+    const ms = zonedToUtc(p.y, p.mo, p.d, h, m, s.tz);
+    if (ms <= now) return ms;
+  }
+  return null;
+}
+function fmtClose(ms, tz) {
+  return new Intl.DateTimeFormat("en-US", { timeZone:tz, weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZoneName:"short" }).format(new Date(ms));
+}
+
+// ---- data ----
 async function getDexes() {
   if (dexList) return dexList;
   try {
     const d = await post({ type:"perpDexs" });
     const names = d.filter(x => x && x.name).map(x => x.name);
-    dexList = ["xyz", ...names.filter(n => n !== "xyz")];
-  } catch(e) { dexList = ["xyz"]; }
+    dexList = ["", "xyz", ...names.filter(n => n !== "xyz")];
+  } catch(e) { dexList = ["", "xyz"]; }
   return dexList;
 }
-// Returns a flat list of {dex, name, px}
-async function fetchAll() {
-  const dexes = await getDexes();
-  const results = await Promise.all(dexes.map(async dex => {
-    try {
-      const [meta, ctxs] = await post({ type:"metaAndAssetCtxs", dex });
-      return meta.universe.map((u, i) => {
-        const c = ctxs[i]; if (!c || u.isDelisted) return null;
-        const name = (u.name.includes(":") ? u.name.split(":")[1] : u.name).toUpperCase();
-        const px = parseFloat(c.midPx ?? c.markPx);
-        return isFinite(px) ? { dex, name, px } : null;
-      }).filter(Boolean);
-    } catch(e) { return []; }
-  }));
-  return results.flat();
+async function fetchDex(dex) {
+  try {
+    const [meta, ctxs] = await post(dex ? { type:"metaAndAssetCtxs", dex } : { type:"metaAndAssetCtxs" });
+    return meta.universe.map((u, i) => {
+      const c = ctxs[i]; if (!c || u.isDelisted) return null;
+      const px = parseFloat(c.midPx ?? c.markPx);
+      let coin = u.name;
+      if (dex && !coin.includes(":")) coin = dex + ":" + coin;
+      return isFinite(px) ? { coin, px } : null;
+    }).filter(Boolean);
+  } catch(e) { return []; }
 }
-function resolve(item, markets) {
-  // explicit market, optionally dex-qualified
-  const tryName = (nm) => {
-    let dex = null, n = nm;
-    if (nm.includes(":")) { [dex, n] = nm.split(":"); dex = dex.toLowerCase(); }
-    const hits = markets.filter(m => m.name === n && (!dex || m.dex === dex));
-    return hits.find(m => m.dex === "xyz") || hits[0] || null;
-  };
-  if (item.market) return tryName(item.market);
-  for (const cand of (ALIASES[item.name] || [item.name])) { const m = tryName(cand); if (m) return m; }
-  return null;
+async function fetchMarkets(items, all) {
+  let dexes;
+  if (all) dexes = await getDexes();
+  else dexes = [...new Set(items.filter(i => i.coin).map(i => i.coin.includes(":") ? i.coin.split(":")[0] : ""))];
+  return (await Promise.all(dexes.map(fetchDex))).flat();
 }
+async function baseline(coin, closeMs) {
+  const k = coin + "|" + closeMs;
+  if (k in baseCache) return baseCache[k];
+  try {
+    const step = 5 * 60000;
+    const candles = await post({ type:"candleSnapshot", req:{ coin, interval:"5m", startTime: closeMs - 60 * 60000, endTime: closeMs } });
+    // candle whose period ends at the bell; else the last one before it
+    const exact = candles.find(c => c.t === closeMs - step);
+    const before = candles.filter(c => c.t < closeMs).pop();
+    const c = exact || before;
+    const v = c ? parseFloat(c.c) : NaN;
+    if (isFinite(v)) baseCache[k] = v;
+    return v;
+  } catch(e) { return NaN; }
+}
+
 const fmt = (n, d=2) => n.toLocaleString(undefined, { minimumFractionDigits:d, maximumFractionDigits:d });
+function fmtPx(n) { return n >= 1000 ? fmt(n, 2) : n >= 1 ? fmt(n, 2) : fmt(n, 4); }
 
 async function update() {
-  const { label, items } = parseCfg(loadCfg());
-  document.getElementById("baseline").textContent = "Baseline: official close " + (label || "(custom)");
+  const items = parseCfg(loadCfg());
   const status = document.getElementById("status");
+  const now = Date.now();
   try {
-    const markets = await fetchAll();
+    const markets = await fetchMarkets(items, false);
     if (!markets.length) throw new Error("no data");
-    lastMarkets = markets;
-    document.getElementById("rows").innerHTML = items.map(it => {
-      const m = resolve(it, markets);
-      const closeTxt = isFinite(it.close) ? fmt(it.close) : "—";
-      if (!m) return `<tr><td>${it.name}</td><td class="na">Not listed</td><td class="hide-sm">${closeTxt}</td><td class="na">—</td><td class="na">—</td></tr>`;
-      const shown = (m.dex === "xyz" ? "" : m.dex + ":") + m.name;
-      const tag = shown !== it.name ? `<span class="tag">${shown}</span>` : "";
-      if (!isFinite(it.close)) return `<tr><td>${it.name}${tag}</td><td>${fmt(m.px)}</td><td class="hide-sm na">—</td><td class="na">—</td><td class="na">—</td></tr>`;
-      const ch = m.px - it.close, pct = ch / it.close * 100, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
+    const byCoin = Object.fromEntries(markets.map(m => [m.coin, m.px]));
+
+    // session close labels
+    const used = [...new Set(items.filter(i => i.coin).map(i => i.session))];
+    document.getElementById("closes").innerHTML = "Last close used: " + used.map(s => {
+      const ms = lastCloseMs(s, now); const S = SESSIONS[s] || SESSIONS.US;
+      return ms ? fmtClose(ms, S.tz) : s;
+    }).join(" · ");
+
+    const rows = await Promise.all(items.map(async it => {
+      if (it.section) return `<tr class="sec"><td colspan="5">${it.section}</td></tr>`;
+      const px = byCoin[it.coin];
+      if (px === undefined) return `<tr><td>${it.name}</td><td class="na">Not listed</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      let close = it.close, fixed = isFinite(close);
+      if (!fixed) { const ms = lastCloseMs(it.session, now); close = ms ? await baseline(it.coin, ms) : NaN; }
+      if (!isFinite(close)) return `<tr><td>${it.name}</td><td>${fmtPx(px)}</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      const ch = px - close, pct = ch / close * 100, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
       const s = ch > 0 ? "+" : "";
       const warn = Math.abs(pct) > 15 ? `<span class="warn">⚠ check</span>` : "";
-      return `<tr><td>${it.name}${tag}${warn}</td><td>${fmt(m.px)}</td><td class="hide-sm">${closeTxt}</td><td class="${cls}">${s}${fmt(ch)}</td><td class="${cls}">${s}${fmt(pct)}%</td></tr>`;
-    }).join("");
+      return `<tr><td>${it.name}${warn}</td><td>${fmtPx(px)}</td><td>${fmtPx(close)}${fixed ? ' <span class="man">fixed</span>' : ""}</td><td class="${cls}">${s}${fmt(pct)}%</td><td class="${cls} hide-sm">${s}${fmtPx(ch)}</td></tr>`;
+    }));
+    document.getElementById("rows").innerHTML = rows.join("");
     status.textContent = "Updated " + new Date().toLocaleTimeString() + " · auto-refresh 30s";
-    renderFind();
   } catch(e) {
     status.textContent = "Couldn't reach Hyperliquid (" + e.message + "). Retrying in 30s.";
   }
 }
 
+// ---- find markets ----
+async function openFind() {
+  document.getElementById("mlist").innerHTML = `<div class="mrow"><span class="na">Loading…</span><span></span></div>`;
+  lastMarkets = await fetchMarkets([], true);
+  renderFind();
+}
 function renderFind() {
-  const box = document.getElementById("findBox");
-  if (box.style.display !== "block") return;
   const q = document.getElementById("findInput").value.trim().toUpperCase();
-  const list = lastMarkets
-    .filter(m => !q || (m.dex + ":" + m.name).toUpperCase().includes(q))
-    .sort((a, b) => (a.dex === "xyz" ? 0 : 1) - (b.dex === "xyz" ? 0 : 1) || a.name.localeCompare(b.name))
-    .slice(0, 300);
+  const list = lastMarkets.filter(m => !q || m.coin.toUpperCase().includes(q))
+    .sort((a, b) => a.coin.localeCompare(b.coin)).slice(0, 300);
   document.getElementById("mlist").innerHTML = list.length
-    ? list.map(m => `<div class="mrow" data-m="${m.dex}:${m.name}"><span>${m.dex}:${m.name}</span><span>${fmt(m.px)}</span></div>`).join("")
+    ? list.map(m => `<div class="mrow" data-c="${m.coin}"><span>${m.coin}</span><span>${fmtPx(m.px)}</span></div>`).join("")
     : `<div class="mrow"><span class="na">No matches</span><span></span></div>`;
 }
 document.getElementById("mlist").addEventListener("click", e => {
-  const row = e.target.closest(".mrow"); if (!row || !row.dataset.m) return;
-  const [dex, name] = row.dataset.m.split(":");
-  const tok = dex === "xyz" ? name : `${name}=${dex}:${name}`;
-  saveCfg(loadCfg().trimEnd() + "\n" + tok + " ?");
+  const row = e.target.closest(".mrow"); if (!row || !row.dataset.c) return;
+  saveCfg(loadCfg().trimEnd() + "\n" + row.dataset.c);
   row.querySelector("span").textContent += "  ✓ added";
   update();
 });
@@ -218,7 +299,7 @@ function toggle(id) {
   const open = b.style.display === "block";
   b.style.display = open ? "none" : "block";
   if (!open && id === "editBox") document.getElementById("cfg").value = loadCfg();
-  if (!open && id === "findBox") renderFind();
+  if (!open && id === "findBox") openFind();
 }
 document.getElementById("toggleFind").onclick = () => toggle("findBox");
 document.getElementById("toggleEdit").onclick = () => toggle("editBox");
