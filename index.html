@@ -70,7 +70,7 @@
 
   <div class="note">
     Live prices from Hyperliquid's public API every 30s (mid price, or mark if no mid).<br>
-    <b>Last close</b> = the perp's price at the bell of the most recent session of its home market (US stocks & indices 4:00 PM ET; gold, silver & PAXG at the COMEX 1:30 PM ET settlement; Korea 3:30 PM KST; Tokyo 3:30 PM JST). While the market is open, the perp tracks the official price, so this lands within a few cents of the official close and updates itself every day. A close typed in the list overrides it (shown with "fixed").<br>
+    <b>Last close</b> = the perp's price at the bell of the most recent session of its home market (US stocks, indices, gold & PAXG 4:00 PM ET; silver at the COMEX 1:30 PM ET settlement; Korea 3:30 PM KST; Tokyo 3:30 PM JST). While the market is open, the perp tracks the official price, so this lands within a few cents of the official close and updates itself every day. A close typed in the list overrides it (shown with "fixed").<br>
     <span style="color:var(--warn)">⚠ check</span> appears on any move over 15%.
   </div>
 </div>
@@ -108,7 +108,8 @@ xyz:CBRS
 xyz:DRAM`;
 
 // Home-market session for names that don't trade on US hours.
-const SESSION_OF = { GOLD:"METAL", SILVER:"METAL", PAXG:"METAL", SKHX:"KRX", SMSN:"KRX", KIOXIA:"TSE" };
+// Gold and PAXG use the US 4:00 PM ET price (user preference); silver stays on the COMEX settlement.
+const SESSION_OF = { GOLD:"US", SILVER:"METAL", PAXG:"US", SKHX:"KRX", SMSN:"KRX", KIOXIA:"TSE" };
 
 // Close times and holidays (weekdays the market is shut). Early closes override the time for that date.
 const SESSIONS = {
