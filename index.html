@@ -32,8 +32,23 @@
   .mlist { max-height:360px; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:8px; margin-top:8px; }
   .mrow { display:flex; justify-content:space-between; padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
   .mrow span:last-child { color:var(--mute); }
+  td.sp, th.sp { text-align:center; padding-left:4px; padding-right:4px; }
+  .spark { display:block; margin:0 auto; }
+  .spark path, .big path.lup, .big path.ldn { fill:none; stroke-width:1.5; stroke-linejoin:round; stroke-linecap:round; }
+  .lup { stroke:var(--up); } .ldn { stroke:var(--down); }
+  .big path.thick { stroke-width:2; }
+  .aup { fill:rgba(34,197,94,.12); } .adn { fill:rgba(239,68,68,.12); }
+  line.base { stroke:var(--mute); stroke-width:1; stroke-dasharray:3 3; opacity:.7; }
+  line.grid { stroke:var(--line); stroke-width:1; }
+  .ax { fill:var(--mute); font-size:11px; } .ax.strong { fill:var(--text); }
+  tr.r { cursor:pointer; } tr.r.open td { background:#1d2230; }
+  tr.detail td { padding:8px 6px 10px; background:#12151c; text-align:left; white-space:normal; }
+  svg.big { width:100%; height:auto; display:block; touch-action:pan-y; }
+  .xhl { stroke:var(--mute); stroke-width:1; } .xhd { fill:var(--text); stroke:var(--card); stroke-width:2; }
+  .tip { color:var(--mute); font-size:12px; margin-top:4px; min-height:16px; }
+  .tip b { color:var(--text); font-weight:600; }
   .note { color:var(--mute); font-size:12px; margin-top:12px; }
-  @media (max-width:560px) { th, td { padding:7px 6px; font-size:13px; } .hide-sm { display:none; } }
+  @media (max-width:560px) { th, td { padding:7px 5px; font-size:13px; } .hide-sm { display:none; } }
 </style>
 </head>
 <body>
@@ -48,7 +63,7 @@
   </div>
   <table>
     <thead><tr>
-      <th>Ticker</th><th>Price</th><th>Last close</th><th>% chg</th><th class="hide-sm">$ chg</th>
+      <th>Ticker</th><th class="sp">Since close</th><th>Price</th><th>Last close</th><th>% chg</th><th class="hide-sm">$ chg</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -236,7 +251,102 @@ async function baseline(coin, closeMs) {
 }
 
 const fmt = (n, d=2) => n.toLocaleString(undefined, { minimumFractionDigits:d, maximumFractionDigits:d });
-function fmtPx(n) { return n >= 1000 ? fmt(n, 2) : n >= 1 ? fmt(n, 2) : fmt(n, 4); }
+function fmtPx(n) { return n >= 1 ? fmt(n, 2) : fmt(n, 4); }
+
+// ---- charts: price path since the last close ----
+const chartCache = {};          // coin -> { closeMs, fetchedAt, pts:[[t,px],...] }
+const CHART_TTL = 120000;       // re-pull candles every 2 min; live price is appended every 30s
+let openCoin = null;            // row expanded to the big chart
+const rowData = {};             // coin -> { pts, close, name } for the big chart + tooltip
+
+function pickInterval(spanMs) {
+  const h = spanMs / 3600000;
+  return h <= 8 ? ["5m", 5] : h <= 48 ? ["15m", 15] : ["30m", 30];
+}
+async function chartPoints(coin, closeMs, now) {
+  const c = chartCache[coin];
+  if (c && c.closeMs === closeMs && now - c.fetchedAt < CHART_TTL) return c.pts;
+  try {
+    const [iv] = pickInterval(now - closeMs);
+    const candles = await post({ type:"candleSnapshot", req:{ coin, interval:iv, startTime: closeMs, endTime: now } });
+    // each candle's close is the price at the end of its period
+    const pts = candles.filter(k => k.t >= closeMs).map(k => [k.T ? k.T + 1 : k.t, parseFloat(k.c)]).filter(p => isFinite(p[1]));
+    chartCache[coin] = { closeMs, fetchedAt: now, pts };
+    return pts;
+  } catch(e) { return c ? c.pts : []; }
+}
+function series(pts, closeMs, close, now, px) {
+  // start at the close, end at the live price
+  const out = [[closeMs, close], ...pts.filter(p => p[0] > closeMs && p[0] < now), [now, px]];
+  return out;
+}
+function scale(pts, close, w, h, padT, padB) {
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  let lo = Math.min(close, ...pts.map(p => p[1])), hi = Math.max(close, ...pts.map(p => p[1]));
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const x = t => (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * w;
+  const y = v => padT + (1 - (v - lo) / (hi - lo)) * (h - padT - padB);
+  return { x, y, lo, hi, t0, t1 };
+}
+function sparkSVG(pts, close, up) {
+  const w = 64, h = 24;
+  if (pts.length < 2) return `<svg class="spark" width="${w}" height="${h}"></svg>`;
+  const s = scale(pts, close, w, h, 3, 3);
+  const d = pts.map((p, i) => (i ? "L" : "M") + s.x(p[0]).toFixed(1) + " " + s.y(p[1]).toFixed(1)).join("");
+  const by = s.y(close).toFixed(1);
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <line x1="0" x2="${w}" y1="${by}" y2="${by}" class="base"/>
+    <path d="${d}" class="${up ? "lup" : "ldn"}"/></svg>`;
+}
+function fmtTime(ms) {
+  return new Intl.DateTimeFormat("en-US", { weekday:"short", hour:"numeric", minute:"2-digit" }).format(new Date(ms));
+}
+function chartW() { return Math.max(280, Math.round(document.querySelector("table").clientWidth - 12)); }
+function bigSVG(coin) {
+  const r = rowData[coin]; if (!r || r.pts.length < 2) return `<div class="na" style="padding:12px">No chart data yet</div>`;
+  const W = chartW(), H = 190, padT = 14, padB = 22, padR = 54;
+  const pts = r.pts, last = pts[pts.length - 1][1], up = last >= r.close;
+  const s = scale(pts, r.close, W - padR, H, padT, padB);
+  const d = pts.map((p, i) => (i ? "L" : "M") + s.x(p[0]).toFixed(1) + " " + s.y(p[1]).toFixed(1)).join("");
+  const area = d + `L${s.x(s.t1).toFixed(1)} ${s.y(r.close).toFixed(1)}L0 ${s.y(r.close).toFixed(1)}Z`;
+  const by = s.y(r.close).toFixed(1);
+  const hiY = s.y(s.hi).toFixed(1), loY = s.y(s.lo).toFixed(1);
+  return `<svg class="big" data-coin="${coin}" viewBox="0 0 ${W} ${H}" data-w="${W}" role="img"
+      aria-label="${r.name} since last close: ${fmtPx(r.close)} to ${fmtPx(last)}">
+    <line x1="0" x2="${W - padR}" y1="${hiY}" y2="${hiY}" class="grid"/>
+    <line x1="0" x2="${W - padR}" y1="${loY}" y2="${loY}" class="grid"/>
+    ${Math.abs(hiY - by) > 13 ? `<text x="${W - padR + 6}" y="${+hiY + 4}" class="ax">${fmtPx(s.hi)}</text>` : ""}
+    ${Math.abs(loY - by) > 13 ? `<text x="${W - padR + 6}" y="${+loY + 4}" class="ax">${fmtPx(s.lo)}</text>` : ""}
+    <path d="${area}" class="${up ? "aup" : "adn"}"/>
+    <line x1="0" x2="${W - padR}" y1="${by}" y2="${by}" class="base"/>
+    <text x="${W - padR + 6}" y="${+by + 4}" class="ax strong">${fmtPx(r.close)}</text>
+    <path d="${d}" class="${up ? "lup" : "ldn"} thick"/>
+    <text x="0" y="${H - 6}" class="ax">${fmtTime(s.t0)} close</text>
+    <text x="${W - padR}" y="${H - 6}" class="ax" text-anchor="end">now</text>
+    <g class="xh" style="display:none"><line class="xhl" y1="${padT}" y2="${H - padB}"/><circle r="4" class="xhd"/></g>
+    <rect x="0" y="0" width="${W - padR}" height="${H}" fill="transparent" class="hit"/>
+  </svg><div class="tip" id="tip-${coin.replace(/[^a-z0-9]/gi, "_")}">Touch the chart to see a time</div>`;
+}
+// crosshair + readout on the big chart (mouse and touch)
+function onChartMove(e) {
+  const svg = e.target.closest("svg.big"); if (!svg) return;
+  const coin = svg.dataset.coin, r = rowData[coin]; if (!r) return;
+  const W = +svg.dataset.w, H = 190, padT = 14, padB = 22, padR = 54;
+  const box = svg.getBoundingClientRect();
+  const cx = (e.touches ? e.touches[0].clientX : e.clientX) - box.left;
+  const xv = cx / box.width * W;
+  const s = scale(r.pts, r.close, W - padR, H, padT, padB);
+  let best = r.pts[0], bd = Infinity;
+  r.pts.forEach(p => { const dd = Math.abs(s.x(p[0]) - xv); if (dd < bd) { bd = dd; best = p; } });
+  const g = svg.querySelector(".xh"); g.style.display = "";
+  const X = s.x(best[0]), Y = s.y(best[1]);
+  g.querySelector("line").setAttribute("x1", X); g.querySelector("line").setAttribute("x2", X);
+  const c = g.querySelector("circle"); c.setAttribute("cx", X); c.setAttribute("cy", Y);
+  const pct = (best[1] - r.close) / r.close * 100, sg = pct > 0 ? "+" : "";
+  const tip = document.getElementById("tip-" + coin.replace(/[^a-z0-9]/gi, "_"));
+  if (tip) tip.innerHTML = `<b>${fmtTime(best[0])}</b> · ${fmtPx(best[1])} · <span class="${pct > 0 ? "up" : pct < 0 ? "down" : ""}">${sg}${fmt(pct)}% vs close</span>`;
+  if (e.touches) e.preventDefault();
+}
 
 async function update() {
   const items = parseCfg(loadCfg());
@@ -247,31 +357,52 @@ async function update() {
     if (!markets.length) throw new Error("no data");
     const byCoin = Object.fromEntries(markets.map(m => [m.coin, m.px]));
 
-    // session close labels
     const used = [...new Set(items.filter(i => i.coin).map(i => i.session))];
-    document.getElementById("closes").innerHTML = "Last close used: " + used.map(s => {
-      const ms = lastCloseMs(s, now); const S = SESSIONS[s] || SESSIONS.US;
-      return ms ? fmtClose(ms, S.tz) : s;
-    }).join(" · ");
+    const NICE = { US:"US", METAL:"COMEX", KRX:"Korea", TSE:"Tokyo" };
+    const seen = {};
+    used.forEach(k => { const ms = lastCloseMs(k, now); if (!ms) return;
+      const t = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", weekday:"short", hour:"numeric", minute:"2-digit" }).format(new Date(ms)) + " ET";
+      (seen[t] = seen[t] || []).push(NICE[k] || k); });
+    document.getElementById("closes").textContent = "Last close: " + Object.entries(seen).map(([t, n]) => n.join("/") + " " + t).join(" · ");
 
     const rows = await Promise.all(items.map(async it => {
-      if (it.section) return `<tr class="sec"><td colspan="5">${it.section}</td></tr>`;
+      if (it.section) return `<tr class="sec"><td colspan="6">${it.section}</td></tr>`;
       const px = byCoin[it.coin];
-      if (px === undefined) return `<tr><td>${it.name}</td><td class="na">Not listed</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      if (px === undefined) return `<tr><td>${it.name}</td><td></td><td class="na">Not listed</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      const closeMs = lastCloseMs(it.session, now);
       let close = it.close, fixed = isFinite(close);
-      if (!fixed) { const ms = lastCloseMs(it.session, now); close = ms ? await baseline(it.coin, ms) : NaN; }
-      if (!isFinite(close)) return `<tr><td>${it.name}</td><td>${fmtPx(px)}</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      if (!fixed) close = closeMs ? await baseline(it.coin, closeMs) : NaN;
+      if (!isFinite(close)) return `<tr><td>${it.name}</td><td></td><td>${fmtPx(px)}</td><td class="na">—</td><td class="na">—</td><td class="na hide-sm">—</td></tr>`;
+      const raw = closeMs ? await chartPoints(it.coin, closeMs, now) : [];
+      const pts = closeMs ? series(raw, closeMs, close, now, px) : [];
+      rowData[it.coin] = { pts, close, name: it.name };
       const ch = px - close, pct = ch / close * 100, cls = ch > 0 ? "up" : ch < 0 ? "down" : "";
       const s = ch > 0 ? "+" : "";
       const warn = Math.abs(pct) > 15 ? `<span class="warn">⚠ check</span>` : "";
-      return `<tr><td>${it.name}${warn}</td><td>${fmtPx(px)}</td><td>${fmtPx(close)}${fixed ? ' <span class="man">fixed</span>' : ""}</td><td class="${cls}">${s}${fmt(pct)}%</td><td class="${cls} hide-sm">${s}${fmtPx(ch)}</td></tr>`;
+      const open = openCoin === it.coin;
+      let html = `<tr class="r${open ? " open" : ""}" data-coin="${it.coin}"><td>${it.name}${warn}</td><td class="sp">${sparkSVG(pts, close, ch >= 0)}</td><td>${fmtPx(px)}</td><td>${fmtPx(close)}${fixed ? ' <span class="man">fixed</span>' : ""}</td><td class="${cls}">${s}${fmt(pct)}%</td><td class="${cls} hide-sm">${s}${fmtPx(ch)}</td></tr>`;
+      if (open) html += `<tr class="detail"><td colspan="6">${bigSVG(it.coin)}</td></tr>`;
+      return html;
     }));
     document.getElementById("rows").innerHTML = rows.join("");
-    status.textContent = "Updated " + new Date().toLocaleTimeString() + " · auto-refresh 30s";
+    status.textContent = "Updated " + new Date().toLocaleTimeString() + " · auto-refresh 30s · tap a row for its chart";
   } catch(e) {
     status.textContent = "Couldn't reach Hyperliquid (" + e.message + "). Retrying in 30s.";
   }
 }
+const tbody = document.getElementById("rows");
+tbody.addEventListener("click", e => {
+  if (e.target.closest("tr.detail")) return;
+  const tr = e.target.closest("tr.r"); if (!tr) return;
+  openCoin = openCoin === tr.dataset.coin ? null : tr.dataset.coin;
+  // re-render from cached data instantly; next refresh brings fresh prices
+  tbody.querySelectorAll("tr.detail").forEach(x => x.remove());
+  tbody.querySelectorAll("tr.r.open").forEach(x => x.classList.remove("open"));
+  if (openCoin) { tr.classList.add("open"); tr.insertAdjacentHTML("afterend", `<tr class="detail"><td colspan="6">${bigSVG(openCoin)}</td></tr>`); }
+});
+tbody.addEventListener("mousemove", onChartMove);
+tbody.addEventListener("touchstart", onChartMove, { passive:false });
+tbody.addEventListener("touchmove", onChartMove, { passive:false });
 
 // ---- find markets ----
 async function openFind() {
